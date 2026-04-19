@@ -1,0 +1,215 @@
+import ctypes
+import ctypes.wintypes
+import threading
+import time
+import random
+from pynput import keyboard
+
+# ==================== Windows API 结构定义 ====================
+# 常量定义
+INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_ABSOLUTE = 0x8000
+KEYEVENTF_KEYDOWN = 0x0000
+KEYEVENTF_KEYUP = 0x0002
+
+# 定义 MOUSEINPUT 结构
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [("dx", ctypes.c_long),
+                ("dy", ctypes.c_long),
+                ("mouseData", ctypes.c_ulong),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+
+# 定义 KEYBDINPUT 结构
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [("wVk", ctypes.c_ushort),
+                ("wScan", ctypes.c_ushort),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+
+# 定义联合体
+class _INPUTunion(ctypes.Union):
+    _fields_ = [("mi", MOUSEINPUT),
+                ("ki", KEYBDINPUT)]
+
+# 定义 INPUT 结构
+class INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong),
+                ("union", _INPUTunion)]
+
+# SendInput 函数原型
+SendInput = ctypes.windll.user32.SendInput
+SendInput.argtypes = (ctypes.c_uint, ctypes.POINTER(INPUT), ctypes.c_int)
+SendInput.restype = ctypes.c_uint
+
+# 虚拟键码（部分）
+VK_CODE = {
+    'w': 0x57,
+    'a': 0x41,
+    's': 0x53,
+    'd': 0x44,
+}
+
+# ==================== 模拟函数 ====================
+def send_mouse_move(dx, dy):
+    """
+    发送相对鼠标移动（不使用绝对坐标）
+    """
+    # 创建 INPUT 结构数组
+    inputs = (INPUT * 1)()
+    inputs[0].type = INPUT_MOUSE
+    inputs[0].union.mi.dx = dx
+    inputs[0].union.mi.dy = dy
+    inputs[0].union.mi.dwFlags = MOUSEEVENTF_MOVE  # 相对移动标志
+    inputs[0].union.mi.time = 0
+    inputs[0].union.mi.dwExtraInfo = None
+    SendInput(1, inputs, ctypes.sizeof(INPUT))
+
+def send_mouse_click():
+    """
+    发送鼠标左键点击（按下+释放）
+    """
+    # 按下
+    inputs_down = (INPUT * 1)()
+    inputs_down[0].type = INPUT_MOUSE
+    inputs_down[0].union.mi.dwFlags = MOUSEEVENTF_LEFTDOWN
+    inputs_down[0].union.mi.time = 0
+    inputs_down[0].union.mi.dwExtraInfo = None
+    SendInput(1, inputs_down, ctypes.sizeof(INPUT))
+
+    # 短暂延迟（可选，但建议保留）
+    time.sleep(0.02)
+
+    # 释放
+    inputs_up = (INPUT * 1)()
+    inputs_up[0].type = INPUT_MOUSE
+    inputs_up[0].union.mi.dwFlags = MOUSEEVENTF_LEFTUP
+    inputs_up[0].union.mi.time = 0
+    inputs_up[0].union.mi.dwExtraInfo = None
+    SendInput(1, inputs_up, ctypes.sizeof(INPUT))
+
+def send_key_press(vk_code):
+    """
+    发送按键按下（不释放）
+    """
+    inputs = (INPUT * 1)()
+    inputs[0].type = INPUT_KEYBOARD
+    inputs[0].union.ki.wVk = vk_code
+    inputs[0].union.ki.wScan = 0
+    inputs[0].union.ki.dwFlags = KEYEVENTF_KEYDOWN
+    inputs[0].union.ki.time = 0
+    inputs[0].union.ki.dwExtraInfo = None
+    SendInput(1, inputs, ctypes.sizeof(INPUT))
+
+def send_key_release(vk_code):
+    """
+    发送按键释放
+    """
+    inputs = (INPUT * 1)()
+    inputs[0].type = INPUT_KEYBOARD
+    inputs[0].union.ki.wVk = vk_code
+    inputs[0].union.ki.wScan = 0
+    inputs[0].union.ki.dwFlags = KEYEVENTF_KEYUP
+    inputs[0].union.ki.time = 0
+    inputs[0].union.ki.dwExtraInfo = None
+    SendInput(1, inputs, ctypes.sizeof(INPUT))
+
+def send_key_click(vk_code, duration):
+    """
+    发送按键按下，保持 duration 秒，然后释放
+    """
+    send_key_press(vk_code)
+    time.sleep(duration)
+    send_key_release(vk_code)
+
+# ==================== 功能线程 ====================
+running = False
+
+def mouse_click_loop():
+    """鼠标自动点击循环"""
+    global running
+    while running:
+        delay = 0.6 + 0.05 * random.randint(0, 5)
+        time.sleep(delay)
+        if not running:
+            break
+        send_mouse_click()
+        print(f"[鼠标] 点击，间隔 {delay:.2f} 秒")
+
+def keyboard_press_loop():
+    """随机按下 WASD 键的循环"""
+    global running
+    keys = ['w', 'a', 's', 'd']
+    while running:
+        delay = 0.6 + 0.05 * random.randint(0, 5)
+        time.sleep(delay)
+        if not running:
+            break
+        key = random.choice(keys)
+        y = random.randint(1, 4)
+        duration = 0.1 * y
+        vk = VK_CODE[key]
+        send_key_click(vk, duration)
+        print(f"[键盘] 按下 {key.upper()}，持续 {duration:.2f} 秒")
+
+def camera_move_loop():
+    """随机视角转动循环"""
+    global running
+    while running:
+        delay = 0.8 + 0.1 * random.randint(0, 3)
+        time.sleep(delay)
+        if not running:
+            break
+        # 80% 概率转动
+        if random.random() < 0.8:
+            move_x = random.randint(-500, 500)
+            move_y = random.randint(-300, 300)
+            # 可选：平滑分步移动
+            steps = random.randint(5, 20)
+            step_x = move_x / steps
+            step_y = move_y / steps
+            for _ in range(steps):
+                if not running:
+                    break
+                send_mouse_move(int(step_x), int(step_y))
+                time.sleep(0.005)  # 5ms 步进，可调整
+            print(f"[视角] 相对转动：({move_x:+d}, {move_y:+d}) 像素，步数 {steps}")
+
+# ==================== 热键控制 ====================
+def on_press_f8(key):
+    global running
+    try:
+        if key == keyboard.Key.f8:
+            running = not running
+            print("\n" + "=" * 50)
+            print(">>> 运行状态：", "【启动】" if running else "【停止】")
+            if running:
+                print("启动所有功能：鼠标点击、键盘WASD、视角转动（使用 SendInput）")
+                t1 = threading.Thread(target=mouse_click_loop, daemon=True)
+                t2 = threading.Thread(target=keyboard_press_loop, daemon=True)
+                t3 = threading.Thread(target=camera_move_loop, daemon=True)
+                t1.start()
+                t2.start()
+                t3.start()
+    except Exception as e:
+        print(f"热键错误：{e}")
+
+if __name__ == "__main__":
+    # 检查是否以管理员权限运行（SendInput 需要）
+    try:
+        ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        print("警告：未以管理员权限运行，某些游戏可能无法接收模拟输入")
+        print("建议右键点击脚本，选择「以管理员身份运行」\n")
+
+    listener = keyboard.Listener(on_press=on_press_f8)
+    listener.start()
+    print("脚本已启动，按 F8 启动/停止自动操作")
+    print("使用 SendInput API 模拟相对鼠标移动，更适合游戏视角转动\n")
+    listener.join()
